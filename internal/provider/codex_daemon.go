@@ -606,10 +606,10 @@ func CodexHome() string { return codexHome() }
 // sending to magpie's gateway: the Codex app's app-server, the managed
 // daemon, the CLI's sessions, an editor's codex. A relay magpie leaves at
 // quit for them ends once they all have (codexrelay).
-func CodexPIDs(ctx context.Context) []int {
+func CodexPIDs(ctx context.Context) ([]int, error) {
 	ps, err := listProcesses(ctx)
 	if err != nil {
-		return nil
+		return nil, err
 	}
 	var pids []int
 	for _, p := range ps {
@@ -619,7 +619,7 @@ func CodexPIDs(ctx context.Context) []int {
 			pids = append(pids, p.PID)
 		}
 	}
-	return pids
+	return pids, nil
 }
 
 // StopIdleCodexDaemon stops Codex's app-server daemon for the Codex home

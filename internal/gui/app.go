@@ -20,7 +20,6 @@ import (
 	"github.com/wailsapp/wails/v3/pkg/application"
 	"github.com/wailsapp/wails/v3/pkg/events"
 
-	"github.com/yetone/magpie/internal/agent"
 	"github.com/yetone/magpie/internal/appdir"
 	"github.com/yetone/magpie/internal/autostart"
 	"github.com/yetone/magpie/internal/gateway"
@@ -449,26 +448,7 @@ func Run(version string, showMain bool, link string) error {
 			if handedOver.Load() {
 				return
 			}
-			if served.Load() != nil {
-				ended, err := agent.EndCodexFailover()
-				if err != nil {
-					log.Println("codex failover:", err)
-				}
-				// the threads Codex has open keep the gateway's address
-				// they began with: a relay serves them there on Codex's
-				// own sign-in once the gateway has let go (codexrelay;
-				// idkatbro on X: 503 "Unknown error" till magpie reopened)
-				if ended {
-					if err := agent.RelayOpenCodex(); err != nil {
-						log.Println("codex relay:", err)
-					}
-				}
-			}
-			// the compactions magpie made in Codex's threads written as
-			// Codex's own, for the threads no Codex has open: with magpie
-			// gone they still go on (LukeMa on X)
-			agent.PortCodexRollouts(3 * time.Second)
-			restoreAgentsOnQuit()
+			finishAgentRoutesOnQuit()
 			updates.install(false)
 		},
 		// Wails exits on some webview errors; say why before it does.

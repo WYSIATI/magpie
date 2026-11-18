@@ -970,6 +970,20 @@ that one keeps serving the agents and the Quit goes on).
   nothing is left to cut off. `TestRestoreOnQuitAndRewireOnStart`,
   `TestRestoreOnQuitLeavesUserDisconnected`, `TestRestoreAgentsOnQuit`,
   `TestRestoreOnQuitKeptUnlessSent` and `restore-on-quit.test.cjs`.
+- `finishAgentRoutesOnQuit` in
+  [`restoreonquit.go`](../../internal/gui/restoreonquit.go), called by
+  `OnShutdown` after ruling out update handover, ends legacy Codex failover,
+  ports Codex rollouts, restores agents if requested, then asks
+  `agent.RelayOpenCodex` about pending old processes. A prior Disable has
+  already ended failover; its false return does not suppress this relay.
+  Restore must precede that decision because Disconnect and quit and Put
+  agents back when quitting can remove the endpoint at this quit. Only the
+  app serving the gateway ends failover, restores its agents or starts the
+  relay; handover leaves them to the successor. The persisted endpoint and
+  process cutoff are described in
+  [agent wiring](agent-wiring.md#codex-recovery-after-endpoint-removal).
+  `TestQuitRelaysCodexAfterDisconnectAndRestore` exercises both paths and
+  the non-serving app, using the helper `OnShutdown` calls.
 - Not asked: a restart to update, Uninstall, a browser's page (`magpie
   web`), logging out or shutting down, and the Dock's Quit (AppKit's
   `terminate:`).

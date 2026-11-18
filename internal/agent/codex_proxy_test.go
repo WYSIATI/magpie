@@ -333,6 +333,7 @@ func TestCodexProxiedDriftShowsNoCredentials(t *testing.T) {
 // and the next start's Sync doesn't write it again (TylerBai_loveai on X);
 // a base URL the user wrote stays.
 func TestCodexFailoverEndsWithMagpie(t *testing.T) {
+	relay := fakeRelayQuitProcesses(t)
 	claims := func(m map[string]any) string {
 		b, _ := json.Marshal(m)
 		return "h." + base64.RawURLEncoding.EncodeToString(b) + ".s"
@@ -376,6 +377,9 @@ func TestCodexFailoverEndsWithMagpie(t *testing.T) {
 	if len(asked) != 1 || asked[0] != filepath.Dir(cx.Path) {
 		t.Fatalf("app-server not brought up to date on quit: %q", asked)
 	}
+	if err := RelayOpenCodex(); err != nil || len(relay.relays) != 1 {
+		t.Fatalf("legacy failover left no relay for the old Codex: %v, %+v", err, relay.relays)
+	}
 	asked = nil
 	if err := cx.Sync(); err != nil {
 		t.Fatal(err)
@@ -409,6 +413,7 @@ func TestCodexFailoverEndsWithMagpie(t *testing.T) {
 // table's base_url rather than openai_base_url: one a magpie from before
 // wrote goes as the magpie serving the gateway quits.
 func TestCodexMirrorFailoverEndsWithMagpie(t *testing.T) {
+	relay := fakeRelayQuitProcesses(t)
 	// CC Switch's own bytes (src-tauri services/provider/mod.rs)
 	const unified = "model_provider = \"custom\"\nmodel = \"gpt-5.5\"\n\n" +
 		"[model_providers.custom]\nname = \"OpenAI\"\nrequires_openai_auth = true\nsupports_websockets = true\nwire_api = \"responses\"\n"
@@ -445,6 +450,9 @@ func TestCodexMirrorFailoverEndsWithMagpie(t *testing.T) {
 	if cfg := read(); strings.Contains(cfg, "base_url") || !strings.Contains(cfg, `model_provider = "custom"`) || !strings.Contains(cfg, "supports_websockets = true") {
 		t.Fatalf("magpie quit, CC Switch's mirror still pointed at it:\n%s", cfg)
 	}
+	if err := RelayOpenCodex(); err != nil || len(relay.relays) != 1 {
+		t.Fatalf("mirror failover left no relay for the old Codex: %v, %+v", err, relay.relays)
+	}
 }
 
 // At quit, a relay is left at the gateway's own address for the Codex
@@ -452,8 +460,9 @@ func TestCodexMirrorFailoverEndsWithMagpie(t *testing.T) {
 // magpie was opened again); none when no Codex runs, and none for a
 // gateway on another computer's address, which a relay here can't take.
 func TestRelayOpenCodexLeftForRunningCodex(t *testing.T) {
-	wasStart, wasPIDs := startRelay, codexPIDs
-	t.Cleanup(func() { startRelay, codexPIDs = wasStart, wasPIDs })
+	stashHome(t)
+	wasStart, wasPIDs, wasStarted := startRelay, codexPIDs, codexProcessStarted
+	t.Cleanup(func() { startRelay, codexPIDs, codexProcessStarted = wasStart, wasPIDs, wasStarted })
 	type call struct {
 		addr string
 		pids []int
@@ -464,9 +473,18 @@ func TestRelayOpenCodexLeftForRunningCodex(t *testing.T) {
 		return nil
 	}
 	running := []int{41, 42}
-	codexPIDs = func(context.Context) []int { return running }
+	codexPIDs = func(context.Context) ([]int, error) { return running, nil }
+	codexProcessStarted = func(int) (time.Time, error) { return time.Now().Add(-time.Hour), nil }
+	remember := func() {
+		t.Helper()
+		home, _ := os.UserHomeDir()
+		if err := rememberCodexRelay(here(home), gateway.URL()+gateway.CodexPath); err != nil {
+			t.Fatal(err)
+		}
+	}
 
 	t.Setenv("MAGPIE_ADDR", "127.0.0.1:3499")
+	remember()
 	if err := RelayOpenCodex(); err != nil {
 		t.Fatal(err)
 	}
@@ -475,6 +493,7 @@ func TestRelayOpenCodexLeftForRunningCodex(t *testing.T) {
 	}
 	// a gateway on every interface is reached on loopback, and relayed
 	t.Setenv("MAGPIE_ADDR", "0.0.0.0:3498")
+	remember()
 	if err := RelayOpenCodex(); err != nil || len(started) != 2 || started[1].addr != "127.0.0.1:3498" {
 		t.Fatalf("%v %+v", err, started)
 	}

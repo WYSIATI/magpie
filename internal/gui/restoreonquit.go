@@ -2,6 +2,7 @@ package gui
 
 import (
 	"log"
+	"time"
 
 	"github.com/yetone/magpie/internal/agent"
 	"github.com/yetone/magpie/internal/settings"
@@ -25,12 +26,35 @@ func restoreOnQuit() bool {
 
 // hooks, vars for the tests
 var (
-	servedHere  = func() bool { return served.Load() != nil }
-	quitDetect  = agent.Detected
-	quitRestore = agent.RestoreOnQuit
-	startAgents = agent.All
-	startRewire = agent.RewireOnStart
+	servedHere       = func() bool { return served.Load() != nil }
+	quitDetect       = agent.Detected
+	quitRestore      = agent.RestoreOnQuit
+	startAgents      = agent.All
+	startRewire      = agent.RewireOnStart
+	endCodexAtQuit   = agent.EndCodexFailover
+	portCodexAtQuit  = agent.PortCodexRollouts
+	relayCodexAtQuit = agent.RelayOpenCodex
 )
+
+// finishAgentRoutesOnQuit is the gateway owner's shutdown path, after
+// handover has been ruled out. Restore comes before the relay decision:
+// a Disconnect here, or before the quit, can leave Codex's old processes
+// holding the removed endpoint even when no legacy failover ended now.
+func finishAgentRoutesOnQuit() {
+	serving := servedHere()
+	if serving {
+		if _, err := endCodexAtQuit(); err != nil {
+			log.Println("codex failover:", err)
+		}
+	}
+	portCodexAtQuit(3 * time.Second)
+	restoreAgentsOnQuit()
+	if serving {
+		if err := relayCodexAtQuit(); err != nil {
+			log.Println("codex relay:", err)
+		}
+	}
+}
 
 // restoreAgentsOnQuit is OnShutdown's part of it.
 func restoreAgentsOnQuit() {

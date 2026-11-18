@@ -33,11 +33,23 @@ func stashPath() string { return filepath.Join(filepath.Dir(provider.Path()), "s
 // stashLoad is the stash as a map of the caller's own, to change and write
 // back.
 func stashLoad() map[string]string {
-	m := maps.Clone(stashRead(filememo.ReadNow[map[string]string]))
+	m, _ := stashLoadChecked()
+	return m
+}
+
+// stashLoadChecked is stashLoad with read and parse errors kept: a caller
+// deciding whether recovery is finished must not take an unknown stash
+// for an empty one. The caller holds stashMu when it writes the result.
+func stashLoadChecked() (map[string]string, error) {
+	m, err := stashReadChecked(filememo.ReadNow[map[string]string])
+	if errors.Is(err, fs.ErrNotExist) {
+		err = nil
+	}
+	m = maps.Clone(m)
 	if m == nil {
 		m = map[string]string{}
 	}
-	return m
+	return m, err
 }
 
 // stashShared is the stash for a look at its values: shared with every
@@ -49,12 +61,16 @@ func stashShared() map[string]string {
 }
 
 func stashRead(read func(kind, path string, parse func([]byte) (map[string]string, error)) (map[string]string, error)) map[string]string {
-	m, _ := read("stash", stashPath(), func(b []byte) (map[string]string, error) {
-		out := map[string]string{}
-		json.Unmarshal(b, &out)
-		return out, nil
-	})
+	m, _ := stashReadChecked(read)
 	return m
+}
+
+func stashReadChecked(read func(kind, path string, parse func([]byte) (map[string]string, error)) (map[string]string, error)) (map[string]string, error) {
+	return read("stash", stashPath(), func(b []byte) (map[string]string, error) {
+		out := map[string]string{}
+		err := json.Unmarshal(b, &out)
+		return out, err
+	})
 }
 
 // stashWrite writes m as the stash, a file there that doesn't parse kept

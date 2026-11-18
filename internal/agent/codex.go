@@ -2,13 +2,11 @@ package agent
 
 import (
 	"cmp"
-	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"io/fs"
 	"log"
-	"net"
 	"net/url"
 	"os"
 	"path/filepath"
@@ -24,7 +22,6 @@ import (
 
 	"github.com/yetone/magpie/internal/catalog"
 	"github.com/yetone/magpie/internal/codexcat"
-	"github.com/yetone/magpie/internal/codexrelay"
 	"github.com/yetone/magpie/internal/edit"
 	"github.com/yetone/magpie/internal/filememo"
 	"github.com/yetone/magpie/internal/gateway"
@@ -1410,22 +1407,35 @@ func codexIn(at place) *Agent {
 		return stashShared()[at.key("codex.login")] != "chatgpt" && codexUsedUp() && !codexSignInKept()
 	}
 	dropBase := func() error {
-		forget(at.key("codex.failover"))
 		if !viaBase() {
+			forget(at.key("codex.failover"))
 			return nil
 		}
-		return edit.DelTOMLTop(path, "openai_base_url")
+		base := get("openai_base_url")
+		if err := edit.DelTOMLTop(path, "openai_base_url"); err != nil {
+			return err
+		}
+		if err := rememberCodexRelay(at, base); err != nil {
+			return errors.Join(err, edit.SetTOMLTop(path, edit.KV{Path: "openai_base_url", Value: base}))
+		}
+		forget(at.key("codex.failover"))
+		return nil
 	}
 	dropMirrorFailover := func() error {
 		p := stashShared()[at.key("codex.mirror_failover")]
 		if p == "" {
 			return nil
 		}
-		forget(at.key("codex.mirror_failover"))
 		t, _ := edit.GetTOMLTable(path, "model_providers."+p)
 		if t["base_url"] == at.codexURL() {
-			return edit.DelTOMLKey(path, "model_providers."+p, "base_url")
+			if err := edit.DelTOMLKey(path, "model_providers."+p, "base_url"); err != nil {
+				return err
+			}
+			if err := rememberCodexRelay(at, t["base_url"]); err != nil {
+				return errors.Join(err, edit.SetTOMLKey(path, "model_providers."+p, "base_url", t["base_url"]))
+			}
 		}
+		forget(at.key("codex.mirror_failover"))
 		return nil
 	}
 	// the model spawned subagents start on, when not the parent's; one of
@@ -3132,8 +3142,8 @@ func codexFailover() bool {
 // and keeps it, and KeepCodexDaemonCurrent ends with magpie, so it is
 // restarted here, when no session is on it (thisisvainxx on X: back on
 // its own config, Codex took "several restarts"). ended says it took
-// failover out: a thread open in the Codex app still sends to the
-// gateway's address, which the caller leaves a relay at (codexrelay).
+// failover out. The removed endpoint is remembered for RelayOpenCodex:
+// a thread open in the Codex app can still send to the gateway's address.
 func EndCodexFailover() (ended bool, err error) {
 	home, err := os.UserHomeDir()
 	if err != nil {
@@ -3162,33 +3172,6 @@ func TakeCodexLeftovers() (bool, error) {
 	}
 	return codex(home).TakeLeftovers()
 }
-
-// RelayOpenCodex leaves a relay at the gateway's address for the Codex
-// processes running as magpie quits (codexrelay.Start), when the address
-// is this computer's own and Codex is running at all.
-func RelayOpenCodex() error {
-	u, err := url.Parse(gateway.URL())
-	if err != nil {
-		return err
-	}
-	if ip := net.ParseIP(u.Hostname()); !strings.EqualFold(u.Hostname(), "localhost") && (ip == nil || !ip.IsLoopback()) {
-		return nil
-	}
-	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
-	defer cancel()
-	pids := codexPIDs(ctx)
-	if len(pids) == 0 {
-		return nil
-	}
-	return startRelay(u.Host, pids)
-}
-
-// startRelay and codexPIDs are vars so tests start no relay and list
-// Codex processes of their own.
-var (
-	startRelay = codexrelay.Start
-	codexPIDs  = provider.CodexPIDs
-)
 
 // CodexDesktopList is the list a Codex beside its ChatGPT sign-in is
 // handed, as the file the Codex app reads it from (deskList); ok false

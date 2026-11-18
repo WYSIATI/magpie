@@ -672,12 +672,12 @@ func TestCodexPIDsFindsOpenCodex(t *testing.T) {
 			{PID: os.Getpid(), Args: "/usr/local/bin/codex"},
 		}, nil
 	}
-	if got := CodexPIDs(context.Background()); !slices.Equal(got, []int{11, 12, 13, 14}) {
-		t.Fatalf("got %v", got)
+	if got, err := CodexPIDs(context.Background()); err != nil || !slices.Equal(got, []int{11, 12, 13, 14}) {
+		t.Fatalf("got %v, %v", got, err)
 	}
 	listProcesses = func(context.Context) ([]proc.Process, error) { return nil, errors.New("ps failed") }
-	if got := CodexPIDs(context.Background()); got != nil {
-		t.Fatalf("a failed list gave %v", got)
+	if got, err := CodexPIDs(context.Background()); got != nil || err == nil {
+		t.Fatalf("a failed list gave %v, %v", got, err)
 	}
 }
 
